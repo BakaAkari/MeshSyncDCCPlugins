@@ -83,39 +83,66 @@ class MESHSYNC_OT_test(bpy.types.Operator):
 
 
 class MESHSYNC_OT_auto_sync(bpy.types.Operator):
+    """Toggle auto-sync on/off. ON state is a bpy.app.timers callback (survives
+    the operator returning, so Blender can close normally); OFF unregisters it."""
+
     bl_idname = "meshsync.auto_sync"
     bl_label = "Toggle Auto Sync"
     bl_description = "Continuously sync the scene on a timer while enabled"
 
-    _timer = None
+    _tick_fn = None  # registered bpy.app.timers callback while running
 
-    def modal(self, context, event):
-        if event.type == "TIMER":
-            if not context.scene.meshsync_auto_sync:
-                self.cancel(context)
-                return {"CANCELLED"}
+    @classmethod
+    def _is_running(cls) -> bool:
+        return cls._tick_fn is not None
+
+    @classmethod
+    def _stop(cls) -> None:
+        if cls._tick_fn is not None:
             try:
-                status = sync_scene(context)
-                context.scene.meshsync_last_status = status
+                bpy.app.timers.unregister(cls._tick_fn)
+            except Exception:  # noqa: BLE001 — already unregistered
+                pass
+            cls._tick_fn = None
+
+    @classmethod
+    def _tick(cls):
+        """Timer callback. Returning None unregisters; float = seconds to next."""
+        try:
+            context = bpy.context
+            scene = getattr(context, "scene", None)
+            if scene is None or not getattr(scene, "meshsync_auto_sync", False):
+                cls._tick_fn = None
+                return None
+            try:
+                scene.meshsync_last_status = sync_scene(context)
             except Exception as e:  # noqa: BLE001
-                context.scene.meshsync_last_status = f"auto-sync error: {e}"
-        return {"PASS_THROUGH"}
+                scene.meshsync_last_status = f"auto-sync error: {e}"
+            return max(0.1, float(getattr(scene, "meshsync_interval", 1.0)))
+        except Exception:  # noqa: BLE001 — never leak exceptions into the timer loop
+            cls._tick_fn = None
+            return None
 
     def execute(self, context):
-        wm = context.window_manager
-        if self._timer is not None:
-            return {"CANCELLED"}
-        interval = max(0.1, float(getattr(context.scene, "meshsync_interval", 1.0)))
-        self._timer = wm.event_timer_add(interval, window=context.window)
-        wm.modal_handler_add(self)
-        context.scene.meshsync_auto_sync = True
-        return {"RUNNING_MODAL"}
+        scene = context.scene
+        if self._is_running():
+            # toggle OFF
+            self._stop()
+            scene.meshsync_auto_sync = False
+            scene.meshsync_last_status = "auto-sync stopped"
+            return {"FINISHED"}
+        # toggle ON
+        scene.meshsync_auto_sync = True
+        interval = max(0.1, float(getattr(scene, "meshsync_interval", 1.0)))
+        self.__class__._tick_fn = self.__class__._tick
+        bpy.app.timers.register(self.__class__._tick_fn, first_interval=interval)
+        return {"FINISHED"}
 
     def cancel(self, context):
-        if self._timer is not None:
-            context.window_manager.event_timer_remove(self._timer)
-            self._timer = None
-        context.scene.meshsync_auto_sync = False
+        # Blender is shutting down / operator cancelled: make sure the timer dies.
+        self._stop()
+        if getattr(context, "scene", None) is not None:
+            context.scene.meshsync_auto_sync = False
 
 
 _OPERATORS = (MESHSYNC_OT_sync, MESHSYNC_OT_test, MESHSYNC_OT_auto_sync)

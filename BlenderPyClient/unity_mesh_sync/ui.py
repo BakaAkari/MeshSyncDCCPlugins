@@ -45,54 +45,6 @@ class MESHSYNC_PT_panel(bpy.types.Panel):
             box.label(text=scene.meshsync_last_status)
 
 
-class MESHSYNC_OT_auto_sync_toggle(bpy.types.Operator):
-    bl_idname = "meshsync.auto_sync_toggle"
-    bl_label = "Toggle Auto Sync"
-
-    _timer = None
-    _running = False
-
-    @classmethod
-    def poll(cls, context):
-        return context.scene is not None
-
-    def modal(self, context, event):
-        if event.type == "TIMER":
-            if not context.scene.meshsync_auto_sync:
-                self.cancel(context)
-                return {"CANCELLED"}
-            from .operators import MESHSYNC_OT_sync
-            # Fire sync (debounce handled by interval). Reuse the operator logic via
-            # invoke-less direct call is complex; simplest: call operator's execute
-            # through a new operator instance is not possible without context op;
-            # instead we re-run the manual operator logic here.
-            try:
-                op = MESHSYNC_OT_sync()
-                res = op.execute(context)
-                context.scene.meshsync_last_status = (
-                    "auto-sync ok" if res == {"FINISHED"} else "auto-sync skipped")
-            except Exception as e:  # noqa: BLE001
-                context.scene.meshsync_last_status = f"auto-sync error: {e}"
-        return {"PASS_THROUGH"}
-
-    def execute(self, context):
-        if self._running:
-            return {"CANCELLED"}
-        self._running = True
-        wm = context.window_manager
-        self._timer = wm.event_timer_add(context.scene.meshsync_interval,
-                                         window=context.window)
-        wm.modal_handler_add(self)
-        return {"RUNNING_MODAL"}
-
-    def cancel(self, context):
-        if self._timer:
-            context.window_manager.event_timer_remove(self._timer)
-            self._timer = None
-        self._running = False
-        return {"CANCELLED"}
-
-
 def register():
     from bpy.props import BoolProperty, FloatProperty, IntProperty, StringProperty
 
@@ -112,11 +64,14 @@ def register():
     bpy.types.Scene.meshsync_last_status = StringProperty(name="Last Sync", default="")
 
     bpy.utils.register_class(MESHSYNC_PT_panel)
-    bpy.utils.register_class(MESHSYNC_OT_auto_sync_toggle)
 
 
 def unregister():
-    bpy.utils.unregister_class(MESHSYNC_OT_auto_sync_toggle)
+    # Kill any running auto-sync timer first — a live timer callback referencing
+    # unregistered Scene properties would error every tick after disable/reload.
+    from .operators import MESHSYNC_OT_auto_sync
+    MESHSYNC_OT_auto_sync._stop()
+
     bpy.utils.unregister_class(MESHSYNC_PT_panel)
 
     del bpy.types.Scene.meshsync_host
