@@ -101,6 +101,11 @@ def read_message(b: bytes) -> dict:
                 md = r.u32()
                 e["md_flags"] = md
                 if not (md & 1):
+                    if md & (1 << 2):
+                        # refine_settings: flags, max_bone_influence, scale_factor
+                        rf = r.u32()
+                        r.u32(); r.f32()
+                        e["refine_flags"] = rf
                     if md & (1 << 3): e["indices"] = r.shared_i32()
                     if md & (1 << 4): e["counts"] = r.shared_i32()
                     if md & (1 << 5): e["points"] = r.shared_f3()

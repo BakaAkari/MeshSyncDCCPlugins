@@ -127,14 +127,16 @@ class Transform(Entity):
 
 
 class Mesh(Transform):
-    """C++ Mesh: Transform fields + MeshDataFlags-gated geometry. MVP sends only
-    transform + points + normals + uv0 + indices + counts + material_ids.
-    Submeshes/bones/blendshapes/bounds left unset for now."""
+    """C++ Mesh: Transform fields + MeshDataFlags-gated geometry. MVP sends
+    transform + refine_settings (FLIP_FACES) + points + normals + uv0 +
+    indices + counts + material_ids. Submeshes/bones/blendshapes/bounds left
+    unset for now."""
 
     etype = ENTITY_MESH
 
     # md_flags bits (MeshDataFlagsBit)
     F_UNCHANGED = 0
+    F_HAS_REFINE_SETTINGS = 2
     F_HAS_INDICES = 3
     F_HAS_COUNTS = 4
     F_HAS_POINTS = 5
@@ -143,6 +145,17 @@ class Mesh(Transform):
     F_HAS_COLORS = 10
     F_HAS_MATERIAL_IDS = 12
     F_HAS_UV0 = 24
+
+    # MeshRefineFlagsBit (mirrors msMeshRefineFlags.h)
+    R_LOCAL2WORLD = 2
+    R_FLIP_X = 4
+    R_FLIP_YZ = 5
+    R_FLIP_FACES = 6
+    R_FLIP_U = 7
+    R_FLIP_V = 8
+    R_GEN_NORMALS = 9
+    R_FLIP_NORMALS = 11
+    R_MAKE_DOUBLE_SIDED = 20
 
     def __init__(self):
         super().__init__()
@@ -153,6 +166,13 @@ class Mesh(Transform):
         self.indices = []       # list[int] per-loop vertex refs
         self.counts = []        # list[int] per-face loop counts
         self.material_ids = []  # list[int] per-face; -1 = no material
+        # Refine settings: the C++ Blender client sets FLIP_FACES on EVERY
+        # mesh (msblenContext.cpp doExtractNonEditMeshData) because Blender
+        # polygons are CCW (right-handed) while Unity needs CW (left-handed).
+        # The server's Mesh::refine() pass then reverses winding and flips
+        # normals accordingly. Without this, synced meshes render inside-out
+        # (backface-culled "see-through" look).
+        self.refine_flags = 1 << self.R_FLIP_FACES
 
     def serialize(self, w: Writer) -> None:
         self._write_base(w)      # Entity base (type=MESH, id, host_id, path)
@@ -160,6 +180,8 @@ class Mesh(Transform):
 
         # md_flags
         flags = 0
+        if self.refine_flags:
+            flags |= 1 << self.F_HAS_REFINE_SETTINGS
         if self.points:
             flags |= 1 << self.F_HAS_POINTS
         if self.normals:
@@ -174,7 +196,16 @@ class Mesh(Transform):
             flags |= 1 << self.F_HAS_MATERIAL_IDS
         w.u32(flags & 0xFFFFFFFF)
 
-        # body in SERIALIZE_MESH order
+        # body in SERIALIZE_MESH order — refine_settings comes FIRST
+        if flags & (1 << self.F_HAS_REFINE_SETTINGS):
+            # MeshRefineSettings wire format (msMesh.cpp
+            # SERIALIZE_MESH_REFINE_SETTINGS): flags, max_bone_influence,
+            # scale_factor; then flag-gated fields (none of SPLIT /
+            # GEN_NORMALS_WITH_SMOOTH_ANGLE / LOCAL2WORLD / WORLD2LOCAL /
+            # MIRROR_BASIS / QUADIFY are set by default).
+            w.u32(self.refine_flags & 0xFFFFFFFF)
+            w.u32(255)          # max_bone_influence (C++ default)
+            w.f32(1.0)          # scale_factor (C++ default)
         if flags & (1 << self.F_HAS_INDICES):
             w.shared_vector_i32(self.indices)
         if flags & (1 << self.F_HAS_COUNTS):
