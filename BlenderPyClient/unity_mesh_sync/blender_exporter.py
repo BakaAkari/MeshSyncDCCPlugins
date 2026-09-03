@@ -66,6 +66,27 @@ def _mesh_to_entity(obj: bpy.types.Object, sync_materials: bool,
 
     data = obj.data
     eval_obj = None
+    tmp_mesh = None
+    if getattr(data, "is_editmode", False) and not bake_modifiers:
+        # Live edit-mode geometry: the C++ client does the same via its
+        # doExtractEditMeshData path. Reading obj.data directly in edit mode
+        # gives stale verts AND half-updated loop buffers (foreach_get length
+        # mismatches). bmesh.from_edit_mesh gives the current bmesh contents,
+        # including uncommitted edits.
+        import bmesh
+        try:
+            bm = bmesh.from_edit_mesh(obj.data)
+            tmp_mesh = bpy.data.meshes.new("_meshsync_edit_tmp")
+            bm.to_mesh(tmp_mesh)
+            tmp_mesh.materials.clear()
+            for m in obj.data.materials:
+                tmp_mesh.materials.append(m)
+            data = tmp_mesh
+        except Exception:  # noqa: BLE001 — fall back to raw (stale but safe)
+            if tmp_mesh is not None:
+                bpy.data.meshes.remove(tmp_mesh)
+            tmp_mesh = None
+            data = obj.data
     if bake_modifiers and depsgraph is not None and data is not None:
         try:
             eval_obj = obj.evaluated_get(depsgraph)
@@ -131,6 +152,8 @@ def _mesh_to_entity(obj: bpy.types.Object, sync_materials: bool,
 
     if eval_obj is not None:
         eval_obj.to_mesh_clear()
+    if tmp_mesh is not None:
+        bpy.data.meshes.remove(tmp_mesh)
     return mesh
 
 
