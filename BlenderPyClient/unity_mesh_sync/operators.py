@@ -6,8 +6,8 @@ timer share one code path.
 
 import bpy
 
-from meshsync import protocol as P
-from meshsync.client import DEFAULT_PORT, MeshSyncClient, MeshSyncClientError
+from .meshsync import protocol as P
+from .meshsync.client import DEFAULT_PORT, MeshSyncClient, MeshSyncClientError
 
 from .blender_exporter import export_scene
 

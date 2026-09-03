@@ -7,11 +7,19 @@ Unity MeshSyncServer needs **zero changes** — we emit the same binary wire byt
 ## Layout
 
 ```
-meshsync/    engine-agnostic wire protocol + HTTP client  (no bpy imports → reusable for Godot)
-addon/       Blender addon: exporter + UI + operators
-tests/       unit tests + headless Blender chain tests
-docs/        PROTOCOL-NOTES.md — reverse-engineered wire contract (maintenance doc)
+unity_mesh_sync/           installable Blender addon package (zip root)
+unity_mesh_sync/meshsync/  engine-agnostic wire protocol + HTTP client (no bpy imports → reusable for Godot)
+tests/                     unit tests + headless Blender chain tests
+tools/build_addon_zip.py   builds dist/UnityMeshSync-Blender-<version>.zip (version from bl_info)
+docs/                      PROTOCOL-NOTES.md — reverse-engineered wire contract (maintenance doc)
 ```
+
+## Install
+
+Download `UnityMeshSync-Blender-<version>.zip` from the GitHub Releases page, then
+Blender → Edit → Preferences → Add-ons → Install from Disk → pick the zip → enable
+"Unity Mesh Sync". Panel: View3D → Sidebar → MeshSync. Default port 18080 matches
+the Unity MeshSync package out of the box.
 
 ## Status (2026-09-02)
 

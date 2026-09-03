@@ -96,7 +96,7 @@ class MESHSYNC_OT_auto_sync_toggle(bpy.types.Operator):
 def register():
     from bpy.props import BoolProperty, FloatProperty, IntProperty, StringProperty
 
-    from meshsync.client import DEFAULT_PORT
+    from .meshsync.client import DEFAULT_PORT
 
     bpy.types.Scene.meshsync_host = StringProperty(
         name="Host", default="127.0.0.1")

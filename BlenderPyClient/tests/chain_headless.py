@@ -12,12 +12,12 @@ from pathlib import Path
 
 PKG = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PKG))
-sys.path.insert(0, str(PKG / "addon"))
+sys.path.insert(0, str(PKG / "unity_mesh_sync"))
 sys.path.insert(0, str(PKG / "tests"))
 
 import bpy  # noqa: E402
 from decode_set import read_message  # noqa: E402
-from meshsync import protocol as P  # noqa: E402
+from unity_mesh_sync.meshsync import protocol as P  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
 
@@ -37,7 +37,7 @@ def main():
     cube.matrix_local = rig.matrix_world.inverted() @ cube.matrix_world  # recompute local
     bpy.context.view_layer.update()
 
-    from addon.blender_exporter import export_scene
+    from unity_mesh_sync.blender_exporter import export_scene
     scene = export_scene(bpy.context)
     print(f"[chain] entities: {len(scene.entities)}")
     for e in scene.entities:

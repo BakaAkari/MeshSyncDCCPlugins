@@ -11,7 +11,7 @@ from pathlib import Path
 
 PKG = Path(__file__).resolve().parent.parent  # BlenderPyClient root
 sys.path.insert(0, str(PKG))
-sys.path.insert(0, str(PKG / "addon"))
+sys.path.insert(0, str(PKG / "unity_mesh_sync"))
 
 import bpy  # noqa: E402
 
@@ -23,8 +23,8 @@ def main():
     bpy.ops.object.camera_add(location=(5, -5, 5))
     bpy.ops.object.light_add(type="POINT", location=(3, 3, 3))
 
-    from addon.blender_exporter import export_scene
-    from meshsync import protocol as P
+    from unity_mesh_sync.blender_exporter import export_scene
+    from unity_mesh_sync.meshsync import protocol as P
 
     scene = export_scene(bpy.context)
     print(f"[smoke] exported {len(scene.entities)} entities:")
@@ -52,10 +52,10 @@ def main():
 
     # Optional live probe: only send when a REAL MeshSyncServer is listening.
     # (Probe /protocol_version via HTTP — other services on the port will 404.)
-    from meshsync.client import DEFAULT_PORT
+    from unity_mesh_sync.meshsync.client import DEFAULT_PORT
     host, port = "127.0.0.1", DEFAULT_PORT
     try:
-        from meshsync.client import MeshSyncClient, MeshSyncClientError
+        from unity_mesh_sync.meshsync.client import MeshSyncClient, MeshSyncClientError
         client = MeshSyncClient(host, port)
         version = client.query_protocol_version()
         print(f"[smoke] Unity MeshSyncServer found (protocol {version}) → sending")

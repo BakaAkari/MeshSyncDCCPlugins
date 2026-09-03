@@ -1,0 +1,62 @@
+name: release-blender-addon
+
+on:
+  push:
+    tags: ["blender-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Wire protocol unit tests
+        run: python3 BlenderPyClient/tests/test_wire_protocol.py
+      - name: Independent decode round-trip
+        run: python3 BlenderPyClient/tests/decode_set.py
+
+  package:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build addon zip
+        run: python3 BlenderPyClient/tools/build_addon_zip.py
+      - name: Sanity-check zip structure
+        run: |
+          python3 - <<'EOF'
+          import glob, zipfile
+          zpath = glob.glob("BlenderPyClient/dist/UnityMeshSync-Blender-*.zip")[0]
+          names = zipfile.ZipFile(zpath).namelist()
+          assert "unity_mesh_sync/__init__.py" in names
+          assert "unity_mesh_sync/meshsync/client.py" in names
+          assert not any("__pycache__" in n for n in names)
+          print("zip OK:", zpath, len(names), "entries")
+          EOF
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blender-addon-zip
+          path: BlenderPyClient/dist/*.zip
+          if-no-files-found: error
+
+  release:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: blender-addon-zip
+          path: dist
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true

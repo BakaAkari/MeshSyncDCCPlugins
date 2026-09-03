@@ -14,8 +14,8 @@ from pathlib import Path
 PKG = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PKG))
 
-from meshsync import protocol as P  # noqa: E402
-from meshsync.wire import Writer  # noqa: E402
+from unity_mesh_sync.meshsync import protocol as P  # noqa: E402
+from unity_mesh_sync.meshsync.wire import Writer  # noqa: E402
 
 
 class Reader:

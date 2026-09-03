@@ -14,8 +14,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from meshsync import protocol as P  # noqa: E402
-from meshsync.wire import Writer  # noqa: E402
+from unity_mesh_sync.meshsync import protocol as P  # noqa: E402
+from unity_mesh_sync.meshsync.wire import Writer  # noqa: E402
 
 
 def test_bool_padding():

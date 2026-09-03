@@ -56,7 +56,7 @@ def _mesh_to_entity(obj: bpy.types.Object, sync_materials: bool) -> "object":
     actually has a slot; actual material payloads are a later milestone — without a
     material manager the server shows the default material, which is acceptable MVP."""
 
-    from meshsync import protocol as P
+    from .meshsync import protocol as P
 
     mesh = P.Mesh()
     mesh.path = _hierarchy_path(obj)
@@ -121,7 +121,7 @@ def _mesh_to_entity(obj: bpy.types.Object, sync_materials: bool) -> "object":
 
 
 def _camera_to_entity(obj: bpy.types.Object) -> "object":
-    from meshsync import protocol as P
+    from .meshsync import protocol as P
 
     ent = P.Camera()
     ent.path = _hierarchy_path(obj)
@@ -148,7 +148,7 @@ def _camera_to_entity(obj: bpy.types.Object) -> "object":
 
 
 def _light_to_entity(obj: bpy.types.Object) -> "object":
-    from meshsync import protocol as P
+    from .meshsync import protocol as P
 
     ent = P.Light()
     ent.path = _hierarchy_path(obj)
@@ -185,7 +185,7 @@ def export_scene(context=None, sync_meshes=True, sync_cameras=True,
     exported as a Transform (so Unity can rebuild the hierarchy from paths), and each
     eligible leaf is exported with its type-specific entity. Order is parent-first.
     """
-    from meshsync import protocol as P
+    from .meshsync import protocol as P
 
     ctx = context or bpy.context
     scene = P.Scene()
