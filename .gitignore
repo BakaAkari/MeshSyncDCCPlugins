@@ -81,3 +81,5 @@ Editor/Plugins/*/*
 **/.idea/**
 **/ProjectSettings/RiderScriptEditorPersistedState.asset
 
+__pycache__/
+*.pyc
