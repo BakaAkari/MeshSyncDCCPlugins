@@ -42,13 +42,13 @@ class MeshSyncClient:
         finally:
             conn.close()
 
-    def _get(self, path: str) -> http.client.HTTPResponse:
+    def _get(self, path: str) -> "tuple[int, bytes]":
         conn = http.client.HTTPConnection(self.host, self.port, timeout=self.timeout)
         try:
             conn.request("GET", path)
             resp = conn.getresponse()
-            resp.read()
-            return resp
+            body = resp.read()
+            return resp.status, body
         finally:
             conn.close()
 
@@ -56,18 +56,18 @@ class MeshSyncClient:
     def query_protocol_version(self) -> int:
         """GET /protocol_version — the C++ client uses this as a connectivity probe
         (Client::sync → Server::serveQuery with QueryType::ProtocolVersion)."""
-        resp = self._get("/protocol_version")
-        if resp.status != 200:
-            raise MeshSyncClientError(f"protocol_version probe failed: HTTP {resp.status}")
-        data = resp.read()
-        # Server replies with a raw int32 (protocol version) in its response stream.
-        if len(data) >= 4:
-            return struct.unpack("<i", data[:4])[0]
-        # Fallback: plain text (e.g. "124")
+        status, data = self._get("/protocol_version")
+        if status != 200:
+            raise MeshSyncClientError(f"protocol_version probe failed: HTTP {status}")
+        # Server replies with plain text (std::to_string(msProtocolVersion) →
+        # serveText), e.g. b"124". Accept raw int32 too for robustness.
         try:
             return int(data.decode().strip())
         except Exception:
-            raise MeshSyncClientError("unparseable protocol_version response")
+            pass
+        if len(data) >= 4:
+            return struct.unpack("<i", data[:4])[0]
+        raise MeshSyncClientError(f"unparseable protocol_version response: {data!r}")
 
     # -- messages ---------------------------------------------------------
     def send_set(self, body: bytes) -> None:

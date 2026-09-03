@@ -18,6 +18,8 @@ jobs:
           python-version: "3.11"
       - name: Wire protocol unit tests
         run: python3 BlenderPyClient/tests/test_wire_protocol.py
+      - name: Client HTTP handshake tests
+        run: python3 BlenderPyClient/tests/test_client.py
       - name: Independent decode round-trip
         run: python3 BlenderPyClient/tests/decode_set.py
 
