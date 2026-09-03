@@ -28,8 +28,16 @@ def sync_scene(context, host: str = "", port: int = 0) -> str:
         return "no supported objects to sync"
     client = MeshSyncClient(host, port)
     session = P.new_session_id()
-    msg = P.SetMessage(scene, session_id=session)
-    client.send_set(msg.serialize())
+    # Mirror AsyncSceneSender::send(): SceneBegin fence -> SetMessage(s) ->
+    # SceneEnd fence, all sharing one session_id. Without the fences the
+    # server's session gate (msServer.cpp processMessages) silently skips
+    # every SetMessage — HTTP 200 but nothing applied.
+    client.send_fence(P.FenceMessage(
+        P.FenceMessage.FENCE_BEGIN, session_id=session,
+        dcc_tool_name="Blender").serialize())
+    client.send_set(P.SetMessage(scene, session_id=session).serialize())
+    client.send_fence(P.FenceMessage(
+        P.FenceMessage.FENCE_END, session_id=session).serialize())
     return f"synced {len(scene.entities)} objects to {host}:{port}"
 
 
