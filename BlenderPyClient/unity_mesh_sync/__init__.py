@@ -8,7 +8,7 @@
 bl_info = {
     "name": "Unity Mesh Sync",
     "author": "Baka Akari (fork of unity3d-jp MeshSync; pure-Python rewrite)",
-    "version": (0, 3, 0),
+    "version": (0, 3, 1),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > MeshSync",
     "description": "Live-sync Blender meshes/transforms/cameras/lights to Unity MeshSyncServer",
