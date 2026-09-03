@@ -192,12 +192,18 @@ def _light_to_entity(obj: bpy.types.Object) -> "object":
 
 
 def export_scene(context=None, sync_meshes=True, sync_cameras=True,
-                 sync_lights=True, sync_empties=True, bake_modifiers=False) -> "object":
+                 sync_lights=True, sync_empties=True, bake_modifiers=False,
+                 only_paths=None) -> "object":
     """Build a Scene from visible objects in the active view layer.
 
     Mirrors C++ exportObject semantics: every ancestor of an exported object is itself
     exported as a Transform (so Unity can rebuild the hierarchy from paths), and each
     eligible leaf is exported with its type-specific entity. Order is parent-first.
+
+    only_paths: when given (incremental sync), restrict full serialization to
+    objects whose hierarchy path is in the set; their ancestors are still
+    included so the server can anchor transforms. Mirrors the C++ client's
+    dirty-object subset export driven by depsgraph updates.
     """
     from .meshsync import protocol as P
 
@@ -223,6 +229,8 @@ def export_scene(context=None, sync_meshes=True, sync_cameras=True,
         o for o in ctx.view_layer.objects
         if o.visible_get() and kind_of(o) in ("mesh", "camera", "light")
     ]
+    if only_paths is not None:
+        seeds = [o for o in seeds if _hierarchy_path(o) in only_paths]
 
     # 2) ancestors of seeds must be exported too (parents anchor hierarchy paths)
     need: dict[str, bpy.types.Object] = {}
@@ -261,3 +269,34 @@ def export_scene(context=None, sync_meshes=True, sync_cameras=True,
 
     scene.entities = entities
     return scene
+
+
+def scan_paths(context, sync_meshes=True, sync_cameras=True,
+               sync_lights=True, sync_empties=True) -> "frozenset[str]":
+    """Cheap full-scene scan: hierarchy paths of every object that would be
+    exported, WITHOUT serializing any geometry. Used by incremental sync to
+    detect Blender-side deletions against the server's known state."""
+    ctx = context or bpy.context
+    ctx.view_layer.update()
+
+    def kind_of(obj) -> str | None:
+        if obj.type == "MESH" and sync_meshes:
+            return "mesh"
+        if obj.type == "CAMERA" and sync_cameras:
+            return "camera"
+        if obj.type == "LIGHT" and sync_lights:
+            return "light"
+        if obj.type == "EMPTY" and sync_empties:
+            return "empty"
+        return None
+
+    paths: set[str] = set()
+    for o in ctx.view_layer.objects:
+        if not o.visible_get():
+            continue
+        if kind_of(o) in ("mesh", "camera", "light"):
+            cur = o
+            while cur is not None:
+                paths.add(_hierarchy_path(cur))
+                cur = cur.parent
+    return frozenset(paths)

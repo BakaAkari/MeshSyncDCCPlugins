@@ -9,7 +9,7 @@ import bpy
 from .meshsync import protocol as P
 from .meshsync.client import DEFAULT_PORT, MeshSyncClient, MeshSyncClientError
 
-from .blender_exporter import export_scene
+from .blender_exporter import export_scene, scan_paths
 
 # Session id is generated ONCE per addon lifetime and reused by every sync —
 # matching the upstream C++ DCC clients (AsyncSceneSender keeps one session_id
@@ -23,6 +23,35 @@ _session_id = P.new_session_id()
 # client does the same via depsgraph dirty tracking + its ObjectRecord table.
 _synced_paths: set = set()
 
+# Incremental-sync dirty set: hierarchy paths marked changed by the depsgraph
+# handler. Auto-sync drains this set each tick (full serialization only for
+# dirty objects + their ancestors); manual Sync always sends the full scene.
+# None = "everything dirty" (initial state / fallback), matching the C++
+# client's dirty_all behaviour.
+_dirty_paths = None  # None | set[str]
+
+
+def _mark_dirty(paths) -> None:
+    global _dirty_paths
+    if _dirty_paths is None:
+        return  # already all-dirty; nothing to add
+    _dirty_paths.update(paths)
+
+
+def _depsgraph_post(scene, depsgraph=None):
+    """bpy.app.handlers.depsgraph_update_post — collect changed objects.
+    Same trigger the C++ client uses (onDepsgraphUpdatedPost)."""
+    if depsgraph is None:
+        return
+    from .blender_exporter import _hierarchy_path
+    paths = []
+    for upd in depsgraph.updates:
+        obj = getattr(upd.id, "original", None) or upd.id
+        if isinstance(obj, bpy.types.Object):
+            paths.append(_hierarchy_path(obj))
+    if paths:
+        _mark_dirty(paths)
+
 
 def _bake_modifiers(context) -> bool:
     return bool(getattr(context.scene, "meshsync_bake_modifiers", False))
@@ -35,13 +64,38 @@ def get_server(context) -> "tuple[str, int]":
     return host, port
 
 
-def sync_scene(context, host: str = "", port: int = 0) -> str:
-    """Run one sync pass. Returns a human-readable status string (no bpy.report)."""
+def sync_scene(context, host: str = "", port: int = 0, incremental: bool = False) -> str:
+    """Run one sync pass. Returns a human-readable status string (no bpy.report).
+
+    incremental=True (auto-sync): serialize only depsgraph-dirty objects (plus
+    their ancestors) and drain the dirty set. Deletions are still caught every
+    pass via a cheap full-scene path scan. Falls back to a full sync when the
+    dirty set is in the all-dirty (None) state — first tick, handler gaps, or
+    structural changes.
+    """
+    global _dirty_paths
     if not host:
         host, port = get_server(context)
-    scene = export_scene(context, bake_modifiers=_bake_modifiers(context))
-    if not scene.entities and not _synced_paths:
-        return "no supported objects to sync"
+    bake = _bake_modifiers(context)
+
+    only = None
+    if incremental and _dirty_paths is not None:
+        # new objects (present now, never synced) must go out even if the
+        # depsgraph handler missed them
+        current_all = scan_paths(context)
+        new_paths = current_all - _synced_paths
+        only = set(_dirty_paths) | new_paths
+        if not only and not (_synced_paths - current_all):
+            return "no changes"
+    else:
+        current_all = scan_paths(context)
+
+    scene = export_scene(context, bake_modifiers=bake, only_paths=only)
+    deleted = sorted(_synced_paths - current_all)
+    if not scene.entities and not deleted:
+        if not _synced_paths:
+            return "no supported objects to sync"
+        return "no changes"
     client = MeshSyncClient(host, port)
     session = _session_id
     # Mirror AsyncSceneSender::send(): SceneBegin fence -> SetMessage(s) ->
@@ -54,16 +108,17 @@ def sync_scene(context, host: str = "", port: int = 0) -> str:
     if scene.entities:
         client.send_set(P.SetMessage(scene, session_id=session).serialize())
     # Blender-side deletions: paths we synced before that are gone now.
-    current_paths = {ent.path for ent in scene.entities}
-    deleted = sorted(_synced_paths - current_paths)
     if deleted:
         client.send_delete(P.DeleteMessage(paths=deleted, session_id=session).serialize())
     client.send_fence(P.FenceMessage(
         P.FenceMessage.FENCE_END, session_id=session).serialize())
     _synced_paths.clear()
-    _synced_paths.update(current_paths)
+    _synced_paths.update(current_all)
+    if incremental:
+        _dirty_paths = set()
+    tag = " (incremental)" if only is not None else ""
     suffix = f", deleted {len(deleted)}" if deleted else ""
-    return f"synced {len(scene.entities)} objects to {host}:{port}{suffix}"
+    return f"synced {len(scene.entities)} objects to {host}:{port}{tag}{suffix}"
 
 
 def test_connection(context) -> str:
@@ -148,7 +203,7 @@ class MESHSYNC_OT_auto_sync(bpy.types.Operator):
                 cls._tick_fn = None
                 return None
             try:
-                scene.meshsync_last_status = sync_scene(context)
+                scene.meshsync_last_status = sync_scene(context, incremental=True)
             except Exception as e:  # noqa: BLE001
                 scene.meshsync_last_status = f"auto-sync error: {e}"
             return max(0.1, float(getattr(scene, "meshsync_interval", 1.0)))
@@ -184,8 +239,13 @@ _OPERATORS = (MESHSYNC_OT_sync, MESHSYNC_OT_test, MESHSYNC_OT_auto_sync)
 def register():
     for op in _OPERATORS:
         bpy.utils.register_class(op)
+    if _depsgraph_post not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(_depsgraph_post)
 
 
 def unregister():
+    MESHSYNC_OT_auto_sync._stop()
+    if _depsgraph_post in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(_depsgraph_post)
     for op in reversed(_OPERATORS):
         bpy.utils.unregister_class(op)
