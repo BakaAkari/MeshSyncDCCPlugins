@@ -56,7 +56,11 @@ def register():
         name="Port", default=DEFAULT_PORT, min=1, max=65535)
     bpy.types.Scene.meshsync_auto_sync = BoolProperty(name="Auto Sync", default=False)
     bpy.types.Scene.meshsync_interval = FloatProperty(
-        name="Interval (s)", default=1.0, min=0.1, max=60.0)
+        name="Interval (s)", default=0.25, min=0.02, max=60.0,
+        description="Auto-sync period. Blender-side send costs ~1ms for small "
+                    "scenes (~33ms for 100 objects/10k verts); Unity applies "
+                    "messages per editor tick and coalesces bursts, so ~0.05s "
+                    "(20Hz) is a practical floor for live-viewport use.")
     bpy.types.Scene.meshsync_sync_meshes = BoolProperty(name="Meshes", default=True)
     bpy.types.Scene.meshsync_sync_cameras = BoolProperty(name="Cameras", default=True)
     bpy.types.Scene.meshsync_sync_lights = BoolProperty(name="Lights", default=True)
