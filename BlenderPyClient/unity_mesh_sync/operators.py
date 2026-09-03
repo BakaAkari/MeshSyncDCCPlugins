@@ -11,6 +11,13 @@ from .meshsync.client import DEFAULT_PORT, MeshSyncClient, MeshSyncClientError
 
 from .blender_exporter import export_scene
 
+# Session id is generated ONCE per addon lifetime and reused by every sync —
+# matching the upstream C++ DCC clients (AsyncSceneSender keeps one session_id
+# for the whole process). Unity's CheckForNewSession pops a "A new session
+# started" dialog whenever the id changes; generating a fresh id per sync
+# made auto-sync spam that dialog every tick.
+_session_id = P.new_session_id()
+
 
 def get_server(context) -> "tuple[str, int]":
     scene = context.scene
@@ -27,7 +34,7 @@ def sync_scene(context, host: str = "", port: int = 0) -> str:
     if not scene.entities:
         return "no supported objects to sync"
     client = MeshSyncClient(host, port)
-    session = P.new_session_id()
+    session = _session_id
     # Mirror AsyncSceneSender::send(): SceneBegin fence -> SetMessage(s) ->
     # SceneEnd fence, all sharing one session_id. Without the fences the
     # server's session gate (msServer.cpp processMessages) silently skips
