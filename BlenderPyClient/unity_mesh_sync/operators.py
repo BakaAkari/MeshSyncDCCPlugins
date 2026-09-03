@@ -18,6 +18,15 @@ from .blender_exporter import export_scene
 # made auto-sync spam that dialog every tick.
 _session_id = P.new_session_id()
 
+# Paths successfully synced to the server since addon load. Diffed against each
+# export to detect Blender-side deletions and push DeleteMessages — the C++
+# client does the same via depsgraph dirty tracking + its ObjectRecord table.
+_synced_paths: set = set()
+
+
+def _bake_modifiers(context) -> bool:
+    return bool(getattr(context.scene, "meshsync_bake_modifiers", False))
+
 
 def get_server(context) -> "tuple[str, int]":
     scene = context.scene
@@ -30,8 +39,8 @@ def sync_scene(context, host: str = "", port: int = 0) -> str:
     """Run one sync pass. Returns a human-readable status string (no bpy.report)."""
     if not host:
         host, port = get_server(context)
-    scene = export_scene(context)
-    if not scene.entities:
+    scene = export_scene(context, bake_modifiers=_bake_modifiers(context))
+    if not scene.entities and not _synced_paths:
         return "no supported objects to sync"
     client = MeshSyncClient(host, port)
     session = _session_id
@@ -42,10 +51,19 @@ def sync_scene(context, host: str = "", port: int = 0) -> str:
     client.send_fence(P.FenceMessage(
         P.FenceMessage.FENCE_BEGIN, session_id=session,
         dcc_tool_name="Blender").serialize())
-    client.send_set(P.SetMessage(scene, session_id=session).serialize())
+    if scene.entities:
+        client.send_set(P.SetMessage(scene, session_id=session).serialize())
+    # Blender-side deletions: paths we synced before that are gone now.
+    current_paths = {ent.path for ent in scene.entities}
+    deleted = sorted(_synced_paths - current_paths)
+    if deleted:
+        client.send_delete(P.DeleteMessage(paths=deleted, session_id=session).serialize())
     client.send_fence(P.FenceMessage(
         P.FenceMessage.FENCE_END, session_id=session).serialize())
-    return f"synced {len(scene.entities)} objects to {host}:{port}"
+    _synced_paths.clear()
+    _synced_paths.update(current_paths)
+    suffix = f", deleted {len(deleted)}" if deleted else ""
+    return f"synced {len(scene.entities)} objects to {host}:{port}{suffix}"
 
 
 def test_connection(context) -> str:

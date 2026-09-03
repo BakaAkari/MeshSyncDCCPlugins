@@ -358,6 +358,34 @@ class SetMessage:
         return w.bytes()
 
 
+class DeleteMessage:
+    """POST body for /delete: removes synced entities (and materials/instances,
+    unused here) on the server. Identifier = name(path) + id, serialized as
+    std::string + int32; vectors are uint32 count + elements (msFoundation
+    write_impl<std::vector<T>>)."""
+
+    def __init__(self, paths=None, session_id: int = INVALID_ID, message_id: int = 0):
+        self.paths = list(paths or [])
+        self.session_id = session_id
+        self.message_id = message_id
+
+    def serialize(self) -> bytes:
+        w = Writer()
+        w.i32(PROTOCOL_VERSION)
+        w.i32(self.session_id)
+        w.i32(self.message_id)
+        w.u64(int(time.time_ns()))
+        # entities
+        w.u32(len(self.paths))
+        for p in self.paths:
+            w.string(p)
+            w.i32(INVALID_ID)
+        # materials + instances: empty
+        w.u32(0)
+        w.u32(0)
+        return w.bytes()
+
+
 class FenceMessage:
     """POST body for /fence. type: 1=SceneBegin 2=SceneEnd."""
 

@@ -38,6 +38,7 @@ class MESHSYNC_PT_panel(bpy.types.Panel):
         col.prop(scene, "meshsync_sync_cameras")
         col.prop(scene, "meshsync_sync_lights")
         col.prop(scene, "meshsync_sync_empties")
+        col.prop(scene, "meshsync_bake_modifiers")
 
         if getattr(scene, "meshsync_last_status", ""):
             box = layout.box()
@@ -56,7 +57,7 @@ def register():
         name="Port", default=DEFAULT_PORT, min=1, max=65535)
     bpy.types.Scene.meshsync_auto_sync = BoolProperty(name="Auto Sync", default=False)
     bpy.types.Scene.meshsync_interval = FloatProperty(
-        name="Interval (s)", default=0.25, min=0.02, max=60.0,
+        name="Interval (s)", default=0.05, min=0.01, max=60.0,
         description="Auto-sync period. Blender-side send costs ~1ms for small "
                     "scenes (~33ms for 100 objects/10k verts); Unity applies "
                     "messages per editor tick and coalesces bursts, so ~0.05s "
@@ -65,6 +66,10 @@ def register():
     bpy.types.Scene.meshsync_sync_cameras = BoolProperty(name="Cameras", default=True)
     bpy.types.Scene.meshsync_sync_lights = BoolProperty(name="Lights", default=True)
     bpy.types.Scene.meshsync_sync_empties = BoolProperty(name="Empties", default=True)
+    bpy.types.Scene.meshsync_bake_modifiers = BoolProperty(
+        name="Bake Modifiers", default=False,
+        description="Export the depsgraph-evaluated mesh (modifiers like "
+                    "Subsurf/Mirror baked in) instead of the raw base mesh")
     bpy.types.Scene.meshsync_last_status = StringProperty(name="Last Sync", default="")
 
     bpy.utils.register_class(MESHSYNC_PT_panel)
@@ -86,4 +91,5 @@ def unregister():
     del bpy.types.Scene.meshsync_sync_cameras
     del bpy.types.Scene.meshsync_sync_lights
     del bpy.types.Scene.meshsync_sync_empties
+    del bpy.types.Scene.meshsync_bake_modifiers
     del bpy.types.Scene.meshsync_last_status

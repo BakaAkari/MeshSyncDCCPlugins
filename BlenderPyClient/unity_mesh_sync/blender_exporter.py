@@ -48,13 +48,15 @@ def _fill_transform(ent, obj: bpy.types.Object) -> None:
     ent.extra_flags = 0  # position+rotation+scale only (default td_flags)
 
 
-def _mesh_to_entity(obj: bpy.types.Object, sync_materials: bool) -> "object":
-    """Extract mesh data into a protocol Mesh. MVP sends raw (non-evaluated) mesh
-    data like the C++ default (BakeModifiers=false): obj.data vertices untouched,
-    faces as polygons (not triangulated), per-loop normals via split normals, uv0
-    per-loop. Materials: we export per-face material indices only when the face
-    actually has a slot; actual material payloads are a later milestone — without a
-    material manager the server shows the default material, which is acceptable MVP."""
+def _mesh_to_entity(obj: bpy.types.Object, sync_materials: bool,
+                    depsgraph=None, bake_modifiers: bool = False) -> "object":
+    """Extract mesh data into a protocol Mesh. Mirrors the C++ client's two mesh
+    paths: raw obj.data (BakeModifiers=false, the default) or the depsgraph-
+    evaluated mesh (BakeModifiers=true — modifiers like Subsurf/Mirror are
+    baked into the geometry Unity receives). Faces are sent as polygons (not
+    triangulated); normals are true custom split normals per loop (matching
+    doExtractNonEditMeshData), uv0 per-loop. Materials: per-face material
+    indices only — actual material payloads are a later milestone."""
 
     from .meshsync import protocol as P
 
@@ -63,6 +65,14 @@ def _mesh_to_entity(obj: bpy.types.Object, sync_materials: bool) -> "object":
     _fill_transform(mesh, obj)
 
     data = obj.data
+    eval_obj = None
+    if bake_modifiers and depsgraph is not None and data is not None:
+        try:
+            eval_obj = obj.evaluated_get(depsgraph)
+            data = eval_obj.to_mesh()
+        except Exception:  # noqa: BLE001 — fall back to raw mesh
+            eval_obj = None
+            data = obj.data
     if data is None:
         return mesh
 
@@ -99,14 +109,16 @@ def _mesh_to_entity(obj: bpy.types.Object, sync_materials: bool) -> "object":
     mesh.counts = out_counts
     mesh.indices = indices
     mesh.material_ids = [i for i in out_material_ids] if any(i != -1 for i in out_material_ids) else []
-    # Per-loop normals — MVP: per-face normal broadcast to each loop of the face.
-    # (Blender 4.1+ removed use_auto_smooth; custom split normals parity is a later
-    # milestone. Face normals are correct for flat-shaded / cube-like geometry.)
-    mesh.normals = []
-    for pi in range(n_polys):
-        pn = data.polygons[pi].normal
-        for _ in range(loop_total[pi]):
-            mesh.normals.append((pn.x, pn.y, pn.z))
+    # True custom split normals per loop (smooth shading, sharp edges, normal
+    # modifiers all respected). Mirrors C++ doExtractNonEditMeshData which reads
+    # the same loop-normal layer. Blender 4.1+ exposes this as the
+    # corner_normals attribute collection (calc_normals_split is gone).
+    try:
+        nrm = [0.0] * (n_loops_total * 3)
+        data.corner_normals.foreach_get("vector", nrm)
+        mesh.normals = [(nrm[i], nrm[i + 1], nrm[i + 2]) for i in range(0, n_loops_total * 3, 3)]
+    except Exception:  # noqa: BLE001 — degenerate meshes may lack normals
+        mesh.normals = []
 
     # uv0 per-loop
     uv_layer = None
@@ -117,6 +129,8 @@ def _mesh_to_entity(obj: bpy.types.Object, sync_materials: bool) -> "object":
         uv_layer.foreach_get("uv", uv)
         mesh.uv0 = [(uv[i], uv[i + 1]) for i in range(0, n_loops_total * 2, 2)]
 
+    if eval_obj is not None:
+        eval_obj.to_mesh_clear()
     return mesh
 
 
@@ -178,7 +192,7 @@ def _light_to_entity(obj: bpy.types.Object) -> "object":
 
 
 def export_scene(context=None, sync_meshes=True, sync_cameras=True,
-                 sync_lights=True, sync_empties=True) -> "object":
+                 sync_lights=True, sync_empties=True, bake_modifiers=False) -> "object":
     """Build a Scene from visible objects in the active view layer.
 
     Mirrors C++ exportObject semantics: every ancestor of an exported object is itself
@@ -188,6 +202,9 @@ def export_scene(context=None, sync_meshes=True, sync_cameras=True,
     from .meshsync import protocol as P
 
     ctx = context or bpy.context
+    # Flush pending deletions/renames — view_layer.objects can hold dead
+    # references right after bpy.data.objects.remove until the layer updates.
+    ctx.view_layer.update()
     scene = P.Scene()
 
     def kind_of(obj: bpy.types.Object) -> str | None:
@@ -225,11 +242,13 @@ def export_scene(context=None, sync_meshes=True, sync_cameras=True,
         return d
 
     ordered = sorted(need.values(), key=lambda o: (depth(o), o.name))
+    depsgraph = ctx.evaluated_depsgraph_get() if bake_modifiers else None
     entities: list = []
     for obj in ordered:
         kind = kind_of(obj)
         if kind == "mesh":
-            ent = _mesh_to_entity(obj, False)
+            ent = _mesh_to_entity(obj, False, depsgraph=depsgraph,
+                                  bake_modifiers=bake_modifiers)
         elif kind == "camera":
             ent = _camera_to_entity(obj)
         elif kind == "light":
